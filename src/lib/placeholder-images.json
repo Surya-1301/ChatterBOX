@@ -1,0 +1,53 @@
+
+{
+  "placeholderImages": [
+    {
+      "id": "user-avatar-1",
+      "description": "Avatar for Alex",
+      "imageUrl": "https://picsum.photos/seed/101/200/200",
+      "imageHint": "person portrait"
+    },
+    {
+      "id": "user-avatar-2",
+      "description": "Avatar for Ben",
+      "imageUrl": "https://picsum.photos/seed/102/200/200",
+      "imageHint": "person portrait"
+    },
+    {
+      "id": "user-avatar-3",
+      "description": "Avatar for Chloe",
+      "imageUrl": "https://picsum.photos/seed/103/200/200",
+      "imageHint": "woman portrait"
+    },
+    {
+      "id": "user-avatar-4",
+      "description": "Avatar for David",
+      "imageUrl": "https://picsum.photos/seed/104/200/200",
+      "imageHint": "man portrait"
+    },
+    {
+      "id": "user-avatar-5",
+      "description": "Avatar for You",
+      "imageUrl": "https://picsum.photos/seed/105/200/200",
+      "imageHint": "person glasses"
+    },
+    {
+      "id": "group-avatar-1",
+      "description": "Avatar for #general room",
+      "imageUrl": "https://picsum.photos/seed/201/200/200",
+      "imageHint": "team work"
+    },
+    {
+      "id": "group-avatar-2",
+      "description": "Avatar for #design-team room",
+      "imageUrl": "https://picsum.photos/seed/202/200/200",
+      "imageHint": "creative design"
+    },
+    {
+      "id": "image-attachment-1",
+      "description": "Image attachment in chat",
+      "imageUrl": "https://picsum.photos/seed/301/600/400",
+      "imageHint": "office desk"
+    }
+  ]
+}
