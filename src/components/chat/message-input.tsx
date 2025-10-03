@@ -84,7 +84,7 @@ export default function MessageInput({ onSend, onTyping, messages, isDisabled, p
       const conversationHistory = messages
         .map((m) => `${m.from}: ${m.content}`)
         .join('\n');
-      const result = await getIntelligentResponseSuggestions({ conversationHistory });
+  const result = await getIntelligentResponseSuggestions({ conversationHistory, numberOfSuggestions: 3 });
       setSuggestions(result.suggestions);
     } catch (error) {
       toast({

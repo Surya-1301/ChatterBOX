@@ -61,7 +61,7 @@ const intelligentResponseSuggestionsFlow = ai.defineFlow(
     inputSchema: IntelligentResponseSuggestionsInputSchema,
     outputSchema: IntelligentResponseSuggestionsOutputSchema,
   },
-  async input => {
+  async (input: IntelligentResponseSuggestionsInput) => {
     const {output} = await prompt(input);
     return output!;
   }
