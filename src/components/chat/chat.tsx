@@ -2,13 +2,16 @@
 'use client';
 
 import type { Conversation, Message, User } from '@/lib/types';
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useRef } from 'react';
 import ChatHeader from './chat-header';
 import MessageList from './message-list';
 import MessageInput from './message-input';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2 } from 'lucide-react';
 import { app } from '@/lib/realm';
+import { useTabVisibility } from '@/hooks/use-tab-visibility';
+import { useNotifications } from '@/hooks/use-notifications';
+import GroupSettingsSheet from './group-settings-sheet';
 
 type ChatProps = {
   conversation: Conversation;
@@ -22,15 +25,27 @@ type ChatProps = {
   onOpenChatThemeSettings: () => void;
   onClearChat: (conversationId: string) => void;
   onInitiateCall: (conversation: Conversation, type: 'audio' | 'video') => void;
+  onUpdateGroup?: (conversationId: string, updates: { name?: string; avatar?: string; participants?: string[]; }) => void;
+  onLeaveGroup?: (conversationId: string) => void;
+  onDeleteGroup?: (conversationId: string) => void;
 }
 
-export default function Chat({ conversation, currentUser, users, onBack, onUserUpdate, onAddContact, onRemoveContact, onToggleMute, onOpenChatThemeSettings, onClearChat, onInitiateCall }: ChatProps) {
+export default function Chat({ conversation, currentUser, users, onBack, onUserUpdate, onAddContact, onRemoveContact, onToggleMute, onOpenChatThemeSettings, onClearChat, onInitiateCall, onUpdateGroup, onLeaveGroup, onDeleteGroup }: ChatProps) {
   const { toast } = useToast();
   const [messages, setMessages] = useState<Message[]>([]);
   const [typingUsers, setTypingUsers] = useState<string[]>([]);
   const [isOnline, setIsOnline] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [showGroupSettings, setShowGroupSettings] = useState(false);
+  const previousMessageCountRef = useRef<number>(0);
+  
+  // Notification hooks
+  const isTabVisible = useTabVisibility();
+  const { showMessageNotification, playNotificationSound } = useNotifications({
+    currentUser,
+    isActive: isTabVisible,
+  });
   
   const otherUser = conversation.type === 'private' ? users.find(u => u.id === conversation.participants.find(id => id !== currentUser.id)) : undefined;
   const isBlockedByOther = otherUser?.blockedUsers?.includes(currentUser.id);
@@ -64,7 +79,47 @@ export default function Chat({ conversation, currentUser, users, onBack, onUserU
           const msgs = await res.json();
           let filteredMsgs = msgs;
           if (isCurrentUserBlocked) filteredMsgs = msgs.filter((m:any) => m.from !== otherUser?.id);
-          if (!cancelled) { setMessages(filteredMsgs); setIsLoading(false); }
+          
+          if (!cancelled) { 
+            // Check for new messages and show notifications
+            const previousCount = previousMessageCountRef.current;
+            const newMessages = filteredMsgs.slice(previousCount);
+            
+            // Show notifications for new messages from other users
+            if (previousCount > 0 && newMessages.length > 0) {
+              newMessages.forEach((msg: Message) => {
+                if (msg.from !== currentUser.id && msg.from !== 'system') {
+                  const sender = users.find(u => u.id === msg.from);
+                  const senderName = sender?.name || 'Unknown User';
+                  
+                  // Check if notifications are enabled and conversation is not muted
+                  const notificationsEnabled = currentUser.notificationSettings?.messageNotifications !== false;
+                  const soundsEnabled = currentUser.notificationSettings?.incomingSounds !== false;
+                  const conversationMuted = conversation.muted;
+                  
+                  if (notificationsEnabled && !conversationMuted) {
+                    // Show browser notification
+                    const messageContent = msg.content || msg.fileName || 'File sent';
+                    showMessageNotification(
+                      senderName,
+                      messageContent,
+                      sender?.avatar,
+                      conversation.id
+                    );
+                    
+                    // Play notification sound
+                    if (soundsEnabled) {
+                      playNotificationSound('incoming');
+                    }
+                  }
+                }
+              });
+            }
+            
+            setMessages(filteredMsgs);
+            previousMessageCountRef.current = filteredMsgs.length;
+            setIsLoading(false);
+          }
         } else {
           // Fallback to Realm if API fails
           const mongo = app.currentUser?.mongoClient('mongodb-atlas');
@@ -73,7 +128,43 @@ export default function Chat({ conversation, currentUser, users, onBack, onUserU
           const msgs = await messagesCollection.find({ conversationId: conversation.id }, { sort: { timestamp: 1 } });
           let filteredMsgs = msgs;
           if (isCurrentUserBlocked) filteredMsgs = msgs.filter(m => m.from !== otherUser?.id);
-          if (!cancelled) { setMessages(filteredMsgs); setIsLoading(false); }
+          
+          if (!cancelled) { 
+            // Check for new messages and show notifications (same logic as above)
+            const previousCount = previousMessageCountRef.current;
+            const newMessages = filteredMsgs.slice(previousCount);
+            
+            if (previousCount > 0 && newMessages.length > 0) {
+              newMessages.forEach((msg: Message) => {
+                if (msg.from !== currentUser.id && msg.from !== 'system') {
+                  const sender = users.find(u => u.id === msg.from);
+                  const senderName = sender?.name || 'Unknown User';
+                  
+                  const notificationsEnabled = currentUser.notificationSettings?.messageNotifications !== false;
+                  const soundsEnabled = currentUser.notificationSettings?.incomingSounds !== false;
+                  const conversationMuted = conversation.muted;
+                  
+                  if (notificationsEnabled && !conversationMuted) {
+                    const messageContent = msg.content || msg.fileName || 'File sent';
+                    showMessageNotification(
+                      senderName,
+                      messageContent,
+                      sender?.avatar,
+                      conversation.id
+                    );
+                    
+                    if (soundsEnabled) {
+                      playNotificationSound('incoming');
+                    }
+                  }
+                }
+              });
+            }
+            
+            setMessages(filteredMsgs);
+            previousMessageCountRef.current = filteredMsgs.length;
+            setIsLoading(false);
+          }
         }
         // Optionally, update read status here if needed
       } catch (error) {
@@ -88,7 +179,7 @@ export default function Chat({ conversation, currentUser, users, onBack, onUserU
       cancelled = true;
       clearInterval(interval);
     };
-  }, [conversation.id, isCurrentUserBlocked, otherUser?.id, currentUser.id]);
+  }, [conversation.id, isCurrentUserBlocked, otherUser?.id, currentUser.id, users, currentUser.notificationSettings, conversation.muted]);
   
   const filteredMessages = useMemo(() => {
     if (!searchQuery) {
@@ -192,9 +283,16 @@ export default function Chat({ conversation, currentUser, users, onBack, onUserU
         });
 
         if (res.ok) {
+          // Play outgoing message sound if enabled
+          playNotificationSound('outgoing');
+          
           // Optionally update local messages state immediately
           const created = await res.json();
-          setMessages(prev => [...prev, created]);
+          setMessages(prev => {
+            const newMessages = [...prev, created];
+            previousMessageCountRef.current = newMessages.length;
+            return newMessages;
+          });
           return;
         }
 
@@ -229,6 +327,38 @@ export default function Chat({ conversation, currentUser, users, onBack, onUserU
     // Typing indicator logic would need a backend to be effective between users.
   };
 
+  const handleUpdateGroup = (updates: { name?: string; avatar?: string; participants?: string[]; }) => {
+    if (onUpdateGroup) {
+      onUpdateGroup(conversation.id, updates);
+    }
+  };
+
+  const handleLeaveGroup = () => {
+    if (onLeaveGroup) {
+      onLeaveGroup(conversation.id);
+      onBack(); // Navigate back after leaving
+    }
+  };
+
+  const handleDeleteGroup = () => {
+    if (onDeleteGroup) {
+      onDeleteGroup(conversation.id);
+      onBack(); // Navigate back after deleting
+    }
+  };
+
+  const handleAddUsers = (userIds: string[]) => {
+    const currentParticipants = conversation.participants || [];
+    const newParticipants = [...currentParticipants, ...userIds];
+    handleUpdateGroup({ participants: newParticipants });
+  };
+
+  const handleRemoveUser = (userId: string) => {
+    const currentParticipants = conversation.participants || [];
+    const newParticipants = currentParticipants.filter(id => id !== userId);
+    handleUpdateGroup({ participants: newParticipants });
+  };
+
   if (isLoading) {
     return (
         <div className="flex-1 flex items-center justify-center bg-transparent">
@@ -254,6 +384,8 @@ export default function Chat({ conversation, currentUser, users, onBack, onUserU
         onOpenChatThemeSettings={onOpenChatThemeSettings}
         onClearChat={handleClearChat}
         onInitiateCall={onInitiateCall}
+        onOpenGroupSettings={conversation.type === 'group' ? () => setShowGroupSettings(true) : undefined}
+        users={users}
       />
       <MessageList 
         messages={filteredMessages} 
@@ -275,6 +407,22 @@ export default function Chat({ conversation, currentUser, users, onBack, onUserU
             : 'Type a message'
         }
       />
+      
+      {conversation.type === 'group' && (
+        <GroupSettingsSheet
+          isOpen={showGroupSettings}
+          onClose={() => setShowGroupSettings(false)}
+          conversation={conversation}
+          users={users}
+          currentUser={currentUser}
+          onUpdateGroup={handleUpdateGroup}
+          onLeaveGroup={handleLeaveGroup}
+          onDeleteGroup={handleDeleteGroup}
+          onAddUsers={handleAddUsers}
+          onRemoveUser={handleRemoveUser}
+          isGroupAdmin={true} // For now, assume current user is admin. In real app, this would be determined from conversation data
+        />
+      )}
     </div>
   );
 }

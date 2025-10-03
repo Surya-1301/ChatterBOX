@@ -25,6 +25,8 @@ type ChatHeaderProps = {
   onOpenChatThemeSettings: () => void;
   onClearChat: (conversationId: string) => void;
   onInitiateCall: (conversation: Conversation, type: 'audio' | 'video') => void;
+  onOpenGroupSettings?: () => void;
+  users?: User[];
 };
 
 export default function ChatHeader({
@@ -39,6 +41,8 @@ export default function ChatHeader({
   onToggleMute,
   currentUser,
   onSearch,
+  onOpenGroupSettings,
+  users = [],
   onOpenChatThemeSettings,
   onClearChat,
   onInitiateCall,
@@ -51,20 +55,28 @@ export default function ChatHeader({
   const isMuted = conversation.muted;
 
   const getSubtext = () => {
+    if (conversation.type === 'group') {
+      if (typingUsers.length > 0) {
+        const typingUserNames = typingUsers.map(userId => {
+          const user = users.find(u => u.id === userId);
+          return user?.name || 'Someone';
+        }).join(', ');
+        return `${typingUserNames} ${typingUsers.length > 1 ? 'are' : 'is'} typing...`;
+      }
+      return `${conversation.participants.length} member${conversation.participants.length !== 1 ? 's' : ''}`;
+    }
+    
+    // Private chat logic
     if (isBlocked) {
       return <Badge variant="destructive" className="text-xs">Blocked</Badge>;
     }
     if (typingUsers.length > 0) {
-      const userList = typingUsers.join(', ');
-      return `${userList} ${typingUsers.length > 1 ? 'are' : 'is'} typing...`;
+      return 'typing...';
     }
     if (!isOnline) {
       return <Badge variant="destructive" className="text-xs">Offline</Badge>;
     }
-    if (conversation.type === 'private') {
-      return 'Online';
-    }
-    return `${conversation.participants.length} members`;
+    return 'Online';
   };
   
   const handleBlockToggle = () => {
@@ -150,6 +162,12 @@ export default function ChatHeader({
               </DropdownMenuItem>
               
               <DropdownMenuSeparator />
+
+              {conversation.type === 'group' && onOpenGroupSettings && (
+                <DropdownMenuItem onClick={onOpenGroupSettings}>
+                  <Contact className="mr-2 h-4 w-4" /> Group info
+                </DropdownMenuItem>
+              )}
 
               {conversation.type === 'private' && !isContact && (
                  <DropdownMenuItem onClick={handleAddContact}>

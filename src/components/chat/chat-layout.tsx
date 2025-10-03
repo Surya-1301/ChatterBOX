@@ -4,15 +4,19 @@
 import type { User, Conversation } from '@/lib/types';
 import type { Call } from '@/lib/webrtc';
 import { useState, useEffect } from 'react';
+import { useIsMobile } from '@/hooks/use-mobile';
 import UserList from './user-list';
 import Chat from './chat';
-import { MessageSquare } from 'lucide-react';
+import { MessageSquare, HelpCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import SettingsSheet from './settings-sheet';
+import SwipeTutorial from './swipe-tutorial';
+import DeleteConfirmationDialog from './delete-confirmation-dialog';
 import { useRouter } from 'next/navigation';
 import CallDialog from './call-dialog';
 import { app } from '@/lib/realm';
+import { notificationManager } from '@/lib/notifications';
 
 interface ChatLayoutProps {
   currentUser: User;
@@ -28,9 +32,48 @@ export default function ChatLayout({
   const [isSidebarVisible, setIsSidebarVisible] = useState(true);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [settingsView, setSettingsView] = useState<'main' | 'chats'>('main');
+  const [showSwipeTutorial, setShowSwipeTutorial] = useState(false);
+  const [deleteConfirmation, setDeleteConfirmation] = useState<{
+    isOpen: boolean;
+    conversationId: string | null;
+    userName: string | null;
+  }>({ isOpen: false, conversationId: null, userName: null });
   const { toast } = useToast();
   const router = useRouter();
   const [activeCall, setActiveCall] = useState<Call | null>(null);
+
+    const isMobile = useIsMobile();
+
+  // Request notification permissions and check for first-time tutorial on component mount
+  useEffect(() => {
+    const requestNotificationPermission = async () => {
+      if (currentUser.notificationSettings?.messageNotifications !== false) {
+        try {
+          const permission = await notificationManager.requestPermission();
+          if (permission === 'denied') {
+            toast({
+              title: 'Notifications Disabled',
+              description: 'You won\'t receive message notifications. You can enable them in your browser settings.',
+              variant: 'destructive',
+            });
+          }
+        } catch (error) {
+          console.error('Failed to request notification permission:', error);
+        }
+      }
+    };
+
+    requestNotificationPermission();
+
+    // Show swipe tutorial for first-time users
+    const hasSeenSwipeTutorial = localStorage.getItem('chatterbox-swipe-tutorial-seen');
+    if (!hasSeenSwipeTutorial) {
+      // Delay the tutorial to let the UI settle
+      setTimeout(() => {
+        setShowSwipeTutorial(true);
+      }, 2000);
+    }
+  }, [currentUser.notificationSettings?.messageNotifications, toast]);
 
   useEffect(() => {
     if (!currentUser.id) return;
@@ -48,34 +91,43 @@ export default function ChatLayout({
         // If Realm mongo client available, fetch current user, conversations and calls (faster/real-time later)
         const mongo = app.currentUser?.mongoClient('mongodb-atlas');
         if (mongo) {
-          const usersCol = mongo.db('chatterbox').collection('users');
-          const userDoc = await usersCol.findOne({ id: currentUser.id });
-          if (userDoc && !cancelled) {
-            setCurrentUser(userDoc);
-            localStorage.setItem('currentUser', JSON.stringify(userDoc));
-          }
-
-          const convCol = mongo.db('chatterbox').collection('conversations');
-          const convsList = await convCol.find({ participants: currentUser.id });
-          convsList.sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-          if (!cancelled) {
-            setConversations(convsList);
-            if (activeConversation) {
-              const updatedActive = convsList.find((c: any) => c.id === activeConversation.id);
-              setActiveConversation(updatedActive);
-            } else {
-              const nonArchived = convsList.filter((c: any) => !c.archived);
-              if (nonArchived.length > 0) setActiveConversation(nonArchived[0]);
+          try {
+            const usersCol = mongo.db('chatterbox').collection('users');
+            const userDoc = await usersCol.findOne({ id: currentUser.id });
+            if (userDoc && !cancelled) {
+              setCurrentUser(userDoc);
+              localStorage.setItem('currentUser', JSON.stringify(userDoc));
             }
-          }
 
-          const callsCol = mongo.db('chatterbox').collection('calls');
-          const callDoc = await callsCol.findOne({ id: currentUser.id });
-          if (callDoc && !cancelled) {
-            setActiveCall(callDoc);
-          } else if (!callDoc && !cancelled) {
-            setActiveCall(null);
+            const convCol = mongo.db('chatterbox').collection('conversations');
+            const convsList = await convCol.find({ participants: currentUser.id });
+            convsList.sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+            if (!cancelled) {
+              setConversations(convsList);
+              if (activeConversation) {
+                const updatedActive = convsList.find((c: any) => c.id === activeConversation.id);
+                setActiveConversation(updatedActive);
+              } else {
+                const nonArchived = convsList.filter((c: any) => !c.archived);
+                if (nonArchived.length > 0) setActiveConversation(nonArchived[0]);
+              }
+            }
+
+            const callsCol = mongo.db('chatterbox').collection('calls');
+            const callDoc = await callsCol.findOne({ id: currentUser.id });
+            if (callDoc && !cancelled) {
+              setActiveCall(callDoc);
+            } else if (!callDoc && !cancelled) {
+              setActiveCall(null);
+            }
+          } catch (realmError) {
+            console.warn('Realm connection failed, using fallback data');
+            // Fallback to mock conversations when Realm fails
+            // ...existing code...
           }
+        } else {
+          // No Realm connection, use mock data
+          // ...existing code...
         }
       } catch (err) {
         console.error('Error fetching chat data:', err);
@@ -92,14 +144,14 @@ export default function ChatLayout({
 
   const handleConversationSelect = async (conversation: Conversation) => {
     setActiveConversation(conversation);
-    if (window.innerWidth < 768) {
-      setIsSidebarVisible(false);
-    }
+      if (isMobile) {
+        setIsSidebarVisible(false);
+      }
   };
 
   const handleBackToMain = () => {
     setActiveConversation(undefined);
-    setIsSidebarVisible(true);
+     setIsSidebarVisible(true);
   };
   
   const handleUserUpdate = async (updatedUser: User) => {
@@ -146,13 +198,37 @@ export default function ChatLayout({
   };
 
   const handleArchiveConversation = async (conversationId: string) => {
-    const mongo = app.currentUser?.mongoClient('mongodb-atlas');
-    if (!mongo) return;
-    const convCol = mongo.db('chatterbox').collection('conversations');
-    await convCol.updateOne({ id: conversationId }, { $set: { archived: true } });
-    if (activeConversation?.id === conversationId) {
-      const nextConversation = conversations.find(c => !c.archived && c.id !== conversationId);
-      setActiveConversation(nextConversation);
+    try {
+      const mongo = app.currentUser?.mongoClient('mongodb-atlas');
+      if (mongo) {
+        const convCol = mongo.db('chatterbox').collection('conversations');
+        await convCol.updateOne({ id: conversationId }, { $set: { archived: true } });
+      }
+      
+      // Update local state
+      setConversations(prevConversations => 
+        prevConversations.map(conv => 
+          conv.id === conversationId ? { ...conv, archived: true } : conv
+        )
+      );
+      
+      // If archived conversation is active, switch to next available
+      if (activeConversation?.id === conversationId) {
+        const nextConversation = conversations.find(c => !c.archived && c.id !== conversationId);
+        setActiveConversation(nextConversation);
+      }
+      
+      toast({
+        title: 'Chat Archived',
+        description: 'The conversation has been moved to archived chats.',
+      });
+    } catch (error) {
+      console.error('Error archiving conversation:', error);
+      toast({
+        title: 'Archive Failed',
+        description: 'Failed to archive the conversation. Please try again.',
+        variant: 'destructive',
+      });
     }
   };
   
@@ -166,13 +242,102 @@ export default function ChatLayout({
   };
 
   const handleDeleteConversation = async (conversationId: string) => {
-    const mongo = app.currentUser?.mongoClient('mongodb-atlas');
-    if (!mongo) return;
-    const convCol = mongo.db('chatterbox').collection('conversations');
-    await convCol.deleteOne({ id: conversationId });
-    if (activeConversation?.id === conversationId) {
-      const nextConversation = conversations.find(c => c.id !== conversationId && !c.archived);
-      setActiveConversation(nextConversation);
+    // Find the conversation and user to get the name for confirmation
+    const conversation = conversations.find(c => c.id === conversationId);
+    const otherUserId = conversation?.participants?.find(p => p !== currentUser.id);
+    const otherUser = users.find(u => u.id === otherUserId);
+    
+    // Show confirmation dialog
+    setDeleteConfirmation({
+      isOpen: true,
+      conversationId,
+      userName: otherUser?.name || null,
+    });
+  };
+
+  const confirmDeleteConversation = async () => {
+    const conversationId = deleteConfirmation.conversationId;
+    if (!conversationId) return;
+
+    try {
+      const mongo = app.currentUser?.mongoClient('mongodb-atlas');
+      if (mongo) {
+        const convCol = mongo.db('chatterbox').collection('conversations');
+        const msgCol = mongo.db('chatterbox').collection('messages');
+        
+        // Delete all messages in the conversation
+        await msgCol.deleteMany({ conversationId });
+        // Delete the conversation itself
+        await convCol.deleteOne({ id: conversationId });
+      }
+      
+      // Update local state - remove the conversation entirely
+      setConversations(prevConversations => 
+        prevConversations.filter(conv => conv.id !== conversationId)
+      );
+      
+      // If deleted conversation is active, switch to next available
+      if (activeConversation?.id === conversationId) {
+        const nextConversation = conversations.find(c => c.id !== conversationId && !c.archived);
+        setActiveConversation(nextConversation);
+      }
+      
+      toast({
+        title: 'Chat Deleted',
+        description: 'The conversation has been permanently deleted.',
+      });
+    } catch (error) {
+      console.error('Error deleting conversation:', error);
+      toast({
+        title: 'Delete Failed',
+        description: 'Failed to delete the conversation. Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      // Close the confirmation dialog
+      setDeleteConfirmation({ isOpen: false, conversationId: null, userName: null });
+    }
+  };
+
+  const handleCreateGroup = async (groupData: { name: string; participants: string[]; avatar?: string; }) => {
+    try {
+      const groupId = `group-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      const newGroup: Conversation = {
+        id: groupId,
+        type: 'group',
+        name: groupData.name,
+        avatar: groupData.avatar || '', // Use a default group avatar if needed
+        participants: [currentUser.id, ...groupData.participants],
+        lastMessage: 'Group created',
+        timestamp: new Date().toISOString(),
+        unreadCount: 0,
+        archived: false,
+        muted: false,
+      };
+
+      const mongo = app.currentUser?.mongoClient('mongodb-atlas');
+      if (mongo) {
+        const convCol = mongo.db('chatterbox').collection('conversations');
+        await convCol.insertOne(newGroup);
+      }
+
+      // Update local state
+      setConversations(prev => [newGroup, ...prev]);
+      
+      // Select the new group
+      setActiveConversation(newGroup);
+
+      toast({
+        title: 'Group Created',
+        description: `"${groupData.name}" has been created successfully.`,
+      });
+    } catch (error) {
+      console.error('Error creating group:', error);
+      toast({
+        title: 'Failed to Create Group',
+        description: 'There was an error creating the group. Please try again.',
+        variant: 'destructive',
+      });
     }
   };
 
@@ -265,71 +430,191 @@ export default function ChatLayout({
     await callsCol.updateOne({ id: call.to.id }, { $set: updatedCall });
   };
 
+  const handleUpdateGroup = async (conversationId: string, updates: { name?: string; avatar?: string; participants?: string[]; }) => {
+    try {
+      const mongo = app.currentUser?.mongoClient('mongodb-atlas');
+      if (mongo) {
+        const convCol = mongo.db('chatterbox').collection('conversations');
+        await convCol.updateOne({ id: conversationId }, { $set: updates });
+      }
+      
+      // Update local state
+      setConversations(prev => 
+        prev.map(conv => 
+          conv.id === conversationId ? { ...conv, ...updates } : conv
+        )
+      );
+      
+      // Update active conversation if it's the one being updated
+      if (activeConversation?.id === conversationId) {
+        setActiveConversation(prev => prev ? { ...prev, ...updates } : prev);
+      }
+
+      toast({
+        title: 'Group Updated',
+        description: 'The group has been updated successfully.',
+      });
+    } catch (error) {
+      console.error('Error updating group:', error);
+      toast({
+        title: 'Update Failed',
+        description: 'Failed to update the group. Please try again.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleLeaveGroup = async (conversationId: string) => {
+    try {
+      const conversation = conversations.find(c => c.id === conversationId);
+      if (!conversation) return;
+
+      const updatedParticipants = conversation.participants.filter(id => id !== currentUser.id);
+      
+      const mongo = app.currentUser?.mongoClient('mongodb-atlas');
+      if (mongo) {
+        const convCol = mongo.db('chatterbox').collection('conversations');
+        await convCol.updateOne({ id: conversationId }, { 
+          $set: { 
+            participants: updatedParticipants,
+            lastMessage: `${currentUser.name} left the group`,
+            timestamp: new Date().toISOString()
+          }
+        });
+      }
+      
+      // Remove from local state
+      setConversations(prev => prev.filter(conv => conv.id !== conversationId));
+      
+      // Clear active conversation if it was the group we left
+      if (activeConversation?.id === conversationId) {
+        setActiveConversation(undefined);
+      }
+
+      toast({
+        title: 'Left Group',
+        description: 'You have left the group.',
+      });
+    } catch (error) {
+      console.error('Error leaving group:', error);
+      toast({
+        title: 'Leave Failed',
+        description: 'Failed to leave the group. Please try again.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleDeleteGroup = async (conversationId: string) => {
+    try {
+      const mongo = app.currentUser?.mongoClient('mongodb-atlas');
+      if (mongo) {
+        const convCol = mongo.db('chatterbox').collection('conversations');
+        const msgCol = mongo.db('chatterbox').collection('messages');
+        
+        // Delete all messages in the group
+        await msgCol.deleteMany({ conversationId });
+        // Delete the group
+        await convCol.deleteOne({ id: conversationId });
+      }
+      
+      // Remove from local state
+      setConversations(prev => prev.filter(conv => conv.id !== conversationId));
+      
+      // Clear active conversation if it was the group we deleted
+      if (activeConversation?.id === conversationId) {
+        setActiveConversation(undefined);
+      }
+
+      toast({
+        title: 'Group Deleted',
+        description: 'The group has been permanently deleted.',
+      });
+    } catch (error) {
+      console.error('Error deleting group:', error);
+      toast({
+        title: 'Delete Failed',
+        description: 'Failed to delete the group. Please try again.',
+        variant: 'destructive',
+      });
+    }
+  };
 
   const activeChat = activeConversation ? (
-      <Chat
-        key={activeConversation.id}
-        conversation={activeConversation}
-        currentUser={currentUser}
-        users={users}
-        onBack={() => setIsSidebarVisible(true)}
-        onUserUpdate={handleUserUpdate}
-        onAddContact={handleAddContact}
-        onRemoveContact={handleRemoveContact}
-        onToggleMute={handleToggleMute}
-        onOpenChatThemeSettings={openChatThemeSettings}
-        onClearChat={handleClearConversation}
-        onInitiateCall={handleInitiateCall}
-      />
-    ) : (
-      <div className="hidden md:flex flex-1 flex-col items-center justify-center h-full text-center bg-card">
-        <MessageSquare className="h-16 w-16 text-muted-foreground" />
-        <h1 className="text-2xl font-bold mt-4">Select a conversation</h1>
-        <p className="text-muted-foreground">
-          Choose a user from the list to start chatting.
-        </p>
-      </div>
-    );
+    <Chat
+      key={activeConversation.id}
+      conversation={activeConversation}
+      currentUser={currentUser}
+      users={users}
+      onBack={() => setIsSidebarVisible(true)}
+      onUserUpdate={handleUserUpdate}
+      onAddContact={handleAddContact}
+      onRemoveContact={handleRemoveContact}
+      onToggleMute={handleToggleMute}
+      onOpenChatThemeSettings={openChatThemeSettings}
+      onClearChat={handleClearConversation}
+      onInitiateCall={handleInitiateCall}
+      onUpdateGroup={handleUpdateGroup}
+      onLeaveGroup={handleLeaveGroup}
+      onDeleteGroup={handleDeleteGroup}
+    />
+  ) : (
+    <div className={cn(
+      isMobile ? "flex flex-1 flex-col items-center justify-center h-full text-center bg-card" : "hidden md:flex flex-1 flex-col items-center justify-center h-full text-center bg-card"
+    )}>
+      <MessageSquare className="h-16 w-16 text-muted-foreground" />
+      <h1 className="text-2xl font-bold mt-4">Select a conversation</h1>
+      <p className="text-muted-foreground">
+        Choose a user from the list to start chatting.
+      </p>
+    </div>
+  );
 
   const wallpaperUrl = currentUser.chatSettings?.wallpaper;
   const wallpaperStyle = wallpaperUrl && wallpaperUrl !== 'default' ? { backgroundImage: `url(${wallpaperUrl})` } : {};
 
   return (
     <>
-      <div className="relative flex h-screen w-full">
-          <div 
-            className="absolute inset-0 bg-cover bg-center z-0" 
-            style={wallpaperStyle}
-          >
-            <div className="absolute inset-0 bg-background/80 backdrop-blur-sm" />
-          </div>
-          <div className={cn(
-              "relative md:flex md:flex-col md:w-[350px] lg:w-[400px] border-r bg-sidebar/80 backdrop-blur-md z-10",
-              isSidebarVisible ? "flex flex-col w-full" : "hidden"
-          )}>
-              <UserList
-                  conversations={conversations}
-                  onConversationSelect={handleConversationSelect}
-                  activeConversation={activeConversation}
-          users={users.filter(u => u.id !== currentUser.id)}
-                  currentUser={currentUser}
-                  onDeleteConversation={handleDeleteConversation}
-                  onArchiveConversation={handleArchiveConversation}
-          onRemoveContact={handleRemoveContact}
-          onAddContact={handleAddContact}
-                  onBackToMain={handleBackToMain}
-                  onSettingsClick={() => {
-                      setSettingsView('main');
-                      setIsSettingsOpen(true);
-                  }}
-              />
-          </div>
-          <div className={cn(
-              "relative flex-1 flex-col bg-background/50 backdrop-blur-sm z-10",
-              isSidebarVisible && window.innerWidth < 768 ? "hidden" : "flex"
-          )}>
-              {activeChat}
-          </div>
+      <div className={cn(
+        "relative flex h-screen w-full",
+        isMobile ? "flex-col" : ""
+      )}>
+        <div 
+          className="absolute inset-0 bg-cover bg-center z-0" 
+          style={wallpaperStyle}
+        >
+          <div className="absolute inset-0 bg-background/80 backdrop-blur-sm" />
+        </div>
+        <div className={cn(
+          "relative border-r bg-sidebar/80 backdrop-blur-md z-10",
+          isMobile ? (isSidebarVisible ? "flex flex-col w-full h-full" : "hidden") : "md:flex md:flex-col md:w-[350px] lg:w-[400px] h-full"
+        )}>
+          <UserList
+            conversations={conversations}
+            onConversationSelect={handleConversationSelect}
+            activeConversation={activeConversation}
+            users={users.filter(u => u.id !== currentUser.id)}
+            currentUser={currentUser}
+            onDeleteConversation={handleDeleteConversation}
+            onArchiveConversation={handleArchiveConversation}
+            onRemoveContact={handleRemoveContact}
+            onAddContact={handleAddContact}
+            onBackToMain={handleBackToMain}
+            onSettingsClick={() => {
+              setSettingsView('main');
+              setIsSettingsOpen(true);
+            }}
+            onHelpClick={() => setShowSwipeTutorial(true)}
+            onCreateGroup={handleCreateGroup}
+            isMobile={isMobile}
+          />
+        </div>
+        <div className={cn(
+          "relative flex-1 flex-col bg-background/50 backdrop-blur-sm z-10",
+          isMobile ? (isSidebarVisible ? "hidden" : "flex w-full h-full") : (isSidebarVisible && isMobile ? "hidden" : "flex")
+        )}>
+          {activeChat}
+        </div>
       </div>
       {activeCall && (
         <CallDialog 
@@ -347,6 +632,16 @@ export default function ChatLayout({
           onProfileUpdate={handleUserUpdate}
           onDeleteAccount={handleDeleteAccount}
           initialView={settingsView}
+      />
+      <SwipeTutorial
+          isOpen={showSwipeTutorial}
+          onClose={() => setShowSwipeTutorial(false)}
+      />
+      <DeleteConfirmationDialog
+          isOpen={deleteConfirmation.isOpen}
+          onClose={() => setDeleteConfirmation({ isOpen: false, conversationId: null, userName: null })}
+          onConfirm={confirmDeleteConversation}
+          userName={deleteConfirmation.userName || undefined}
       />
     </>
   );

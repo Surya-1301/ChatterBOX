@@ -1,5 +1,6 @@
 
 import type { User } from './types';
+import io from 'socket.io-client';
 
 const servers = {
   iceServers: [
@@ -75,27 +76,69 @@ export class WebRTCManager {
     }
   }
 
-  // --- Signaling methods below must be implemented using MongoDB Realm or another backend ---
 
-  async setOfferInDB(callId: string, offer: RTCSessionDescriptionInit) {
-    // TODO: Implement signaling using MongoDB Realm or another backend
-    throw new Error('setOfferInDB not implemented');
-  }
+    // --- Socket.io signaling implementation ---
+    private static socket: ReturnType<typeof io> | null = null;
 
-  async setAnswerInDB(callId: string, answer: RTCSessionDescriptionInit) {
-    // TODO: Implement signaling using MongoDB Realm or another backend
-    throw new Error('setAnswerInDB not implemented');
-  }
+    static getSocket() {
+      if (!WebRTCManager.socket) {
+        WebRTCManager.socket = io('http://localhost:4000'); // Update if server runs elsewhere
+      }
+      return WebRTCManager.socket;
+    }
 
-  async addIceCandidateToDB(callId: string, userId: string, candidate: RTCIceCandidate) {
-    // TODO: Implement signaling using MongoDB Realm or another backend
-    throw new Error('addIceCandidateToDB not implemented');
-  }
+    async setOfferInDB(callId: string, offer: RTCSessionDescriptionInit) {
+      const socket = WebRTCManager.getSocket();
+      socket.emit('signal', {
+        callId,
+        from: 'offer',
+        data: offer,
+      });
+    }
 
-  onIceCandidates(callId: string, userId: string, callback: (candidate: RTCIceCandidateInit) => void) {
-    // TODO: Implement signaling using MongoDB Realm or another backend
-    throw new Error('onIceCandidates not implemented');
-  }
+    async setAnswerInDB(callId: string, answer: RTCSessionDescriptionInit) {
+      const socket = WebRTCManager.getSocket();
+      socket.emit('signal', {
+        callId,
+        from: 'answer',
+        data: answer,
+      });
+    }
+
+    async addIceCandidateToDB(callId: string, userId: string, candidate: RTCIceCandidate) {
+      const socket = WebRTCManager.getSocket();
+      socket.emit('signal', {
+        callId,
+        from: 'ice',
+        data: candidate,
+      });
+    }
+
+    onIceCandidates(callId: string, userId: string, callback: (candidate: RTCIceCandidateInit) => void) {
+      const socket = WebRTCManager.getSocket();
+      socket.on('signal', (payload: any) => {
+        if (payload.callId === callId && payload.from === 'ice') {
+          callback(payload.data);
+        }
+      });
+      // Return unsubscribe function
+      return () => {
+        socket.off('signal');
+      };
+    }
+
+    // Listen for offer/answer
+    static onSignal(callId: string, type: 'offer' | 'answer', callback: (data: RTCSessionDescriptionInit) => void) {
+      const socket = WebRTCManager.getSocket();
+      socket.on('signal', (payload: any) => {
+        if (payload.callId === callId && payload.from === type) {
+          callback(payload.data);
+        }
+      });
+      return () => {
+        socket.off('signal');
+      };
+    }
 
   close() {
     this.peerConnection.close();

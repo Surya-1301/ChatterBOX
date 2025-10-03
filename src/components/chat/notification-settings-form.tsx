@@ -2,10 +2,12 @@
 'use client';
 
 import type { User } from '@/lib/types';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/hooks/use-toast';
+import { notificationManager } from '@/lib/notifications';
+import { Button } from '@/components/ui/button';
 
 type NotificationSettingsFormProps = {
   currentUser: User;
@@ -14,6 +16,7 @@ type NotificationSettingsFormProps = {
 
 export default function NotificationSettingsForm({ currentUser, onSave }: NotificationSettingsFormProps) {
   const { toast } = useToast();
+  const [permissionStatus, setPermissionStatus] = useState<NotificationPermission>('default');
   
   const initialSettings = {
     messageNotifications: currentUser.notificationSettings?.messageNotifications !== false,
@@ -25,6 +28,13 @@ export default function NotificationSettingsForm({ currentUser, onSave }: Notifi
   };
 
   const [notificationSettings, setNotificationSettings] = useState(initialSettings);
+
+  // Check notification permission status
+  useEffect(() => {
+    if (notificationManager.isSupported()) {
+      setPermissionStatus(Notification.permission);
+    }
+  }, []);
 
   const updateUser = (newSettings: typeof initialSettings) => {
      try {
@@ -45,16 +55,71 @@ export default function NotificationSettingsForm({ currentUser, onSave }: Notifi
     }
   };
 
-  const handleSwitchChange = (key: keyof typeof initialSettings, checked: boolean) => {
+  const handleSwitchChange = async (key: keyof typeof initialSettings, checked: boolean) => {
+    // If enabling message notifications, request permission first
+    if (key === 'messageNotifications' && checked) {
+      const permission = await notificationManager.requestPermission();
+      setPermissionStatus(permission);
+      
+      if (permission === 'denied') {
+        toast({
+          title: 'Permission Denied',
+          description: 'Please enable notifications in your browser settings to receive message alerts.',
+          variant: 'destructive',
+        });
+        return;
+      }
+    }
+    
     const newSettings = { ...notificationSettings, [key]: checked };
     setNotificationSettings(newSettings);
     updateUser(newSettings);
+  };
+
+  const handleRequestPermission = async () => {
+    const permission = await notificationManager.requestPermission();
+    setPermissionStatus(permission);
+    
+    if (permission === 'granted') {
+      toast({
+        title: 'Notifications Enabled',
+        description: 'You will now receive message notifications.',
+      });
+    } else {
+      toast({
+        title: 'Permission Denied',
+        description: 'Please enable notifications in your browser settings.',
+        variant: 'destructive',
+      });
+    }
   };
   
   return (
     <div className="space-y-4">
         <div>
             <h3 className="text-primary font-semibold mb-2 px-3">Messages</h3>
+            
+            {/* Browser Permission Status */}
+            {notificationManager.isSupported() && permissionStatus === 'denied' && (
+              <div className="p-3 mb-3 bg-destructive/10 border border-destructive/20 rounded-md">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <p className="font-medium text-destructive">Browser notifications are blocked</p>
+                    <p className="text-sm text-muted-foreground">Enable notifications in your browser settings</p>
+                  </div>
+                  <Button variant="outline" size="sm" onClick={handleRequestPermission}>
+                    Enable
+                  </Button>
+                </div>
+              </div>
+            )}
+            
+            {!notificationManager.isSupported() && (
+              <div className="p-3 mb-3 bg-muted border border-muted-foreground/20 rounded-md">
+                <p className="text-sm text-muted-foreground">Browser notifications are not supported</p>
+              </div>
+            )}
+            
             <div className="p-3">
                 <div className="flex justify-between items-center">
                     <label htmlFor="message-notifications" className="cursor-pointer">
@@ -63,11 +128,36 @@ export default function NotificationSettingsForm({ currentUser, onSave }: Notifi
                     </label>
                     <Switch
                     id="message-notifications"
-                    checked={notificationSettings.messageNotifications}
+                    checked={notificationSettings.messageNotifications && permissionStatus !== 'denied'}
                     onCheckedChange={(checked) => handleSwitchChange('messageNotifications', checked)}
+                    disabled={!notificationManager.isSupported()}
                     />
                 </div>
             </div>
+            
+            {/* Test Notification Button */}
+            {notificationSettings.messageNotifications && permissionStatus === 'granted' && (
+              <div className="p-3">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    notificationManager.showMessageNotification(
+                      'Test User',
+                      'This is a test notification!',
+                      undefined,
+                      'test'
+                    );
+                    toast({
+                      title: 'Test Notification Sent',
+                      description: 'Check if you received the notification.',
+                    });
+                  }}
+                >
+                  Test Notification
+                </Button>
+              </div>
+            )}
              <div className="p-3">
                 <div className="flex justify-between items-center">
                     <label htmlFor="show-previews" className="cursor-pointer">
