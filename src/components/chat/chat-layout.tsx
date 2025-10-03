@@ -35,48 +35,47 @@ export default function ChatLayout({
   useEffect(() => {
     if (!currentUser.id) return;
     let cancelled = false;
-    const mongo = app.currentUser?.mongoClient('mongodb-atlas');
-    if (!mongo) return;
 
     async function fetchAll() {
       try {
-        // Fetch users
-        if (!mongo) return;
-        const usersCol = mongo.db('chatterbox').collection('users');
-        const usersList = await usersCol.find({});
-        if (!cancelled) setUsers(usersList);
-
-        // Fetch current user
-        if (!mongo) return;
-        const userDoc = await usersCol.findOne({ id: currentUser.id });
-        if (userDoc && !cancelled) {
-          setCurrentUser(userDoc);
-          localStorage.setItem('currentUser', JSON.stringify(userDoc));
+        // Fetch users via server API (works without Realm)
+        const usersRes = await fetch('/api/users');
+        if (usersRes.ok) {
+          const usersList = await usersRes.json();
+          if (!cancelled) setUsers(usersList);
         }
 
-        // Fetch conversations
-        if (!mongo) return;
-        const convCol = mongo.db('chatterbox').collection('conversations');
-        const convsList = await convCol.find({ participants: currentUser.id });
-        convsList.sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-        if (!cancelled) {
-          setConversations(convsList);
-          if (activeConversation) {
-            const updatedActive = convsList.find((c: any) => c.id === activeConversation.id);
-            setActiveConversation(updatedActive);
-          } else {
-            const nonArchived = convsList.filter((c: any) => !c.archived);
-            if (nonArchived.length > 0) setActiveConversation(nonArchived[0]);
+        // If Realm mongo client available, fetch current user, conversations and calls (faster/real-time later)
+        const mongo = app.currentUser?.mongoClient('mongodb-atlas');
+        if (mongo) {
+          const usersCol = mongo.db('chatterbox').collection('users');
+          const userDoc = await usersCol.findOne({ id: currentUser.id });
+          if (userDoc && !cancelled) {
+            setCurrentUser(userDoc);
+            localStorage.setItem('currentUser', JSON.stringify(userDoc));
           }
-        }
 
-        // Fetch incoming call (polling)
-        const callsCol = mongo.db('chatterbox').collection('calls');
-        const callDoc = await callsCol.findOne({ id: currentUser.id });
-        if (callDoc && !cancelled) {
-          setActiveCall(callDoc);
-        } else if (!callDoc && !cancelled) {
-          setActiveCall(null);
+          const convCol = mongo.db('chatterbox').collection('conversations');
+          const convsList = await convCol.find({ participants: currentUser.id });
+          convsList.sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+          if (!cancelled) {
+            setConversations(convsList);
+            if (activeConversation) {
+              const updatedActive = convsList.find((c: any) => c.id === activeConversation.id);
+              setActiveConversation(updatedActive);
+            } else {
+              const nonArchived = convsList.filter((c: any) => !c.archived);
+              if (nonArchived.length > 0) setActiveConversation(nonArchived[0]);
+            }
+          }
+
+          const callsCol = mongo.db('chatterbox').collection('calls');
+          const callDoc = await callsCol.findOne({ id: currentUser.id });
+          if (callDoc && !cancelled) {
+            setActiveCall(callDoc);
+          } else if (!callDoc && !cancelled) {
+            setActiveCall(null);
+          }
         }
       } catch (err) {
         console.error('Error fetching chat data:', err);
@@ -312,11 +311,12 @@ export default function ChatLayout({
                   conversations={conversations}
                   onConversationSelect={handleConversationSelect}
                   activeConversation={activeConversation}
-                  users={users.filter(u => u.id !== currentUser.id)}
+          users={users.filter(u => u.id !== currentUser.id)}
                   currentUser={currentUser}
                   onDeleteConversation={handleDeleteConversation}
                   onArchiveConversation={handleArchiveConversation}
-                  onRemoveContact={handleRemoveContact}
+          onRemoveContact={handleRemoveContact}
+          onAddContact={handleAddContact}
                   onBackToMain={handleBackToMain}
                   onSettingsClick={() => {
                       setSettingsView('main');

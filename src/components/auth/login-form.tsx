@@ -39,31 +39,49 @@ export default function LoginForm() {
 
   async function onSubmit(values: z.infer<typeof formSchema>) {
     try {
-      // For Realm, login is with email and password
-      const credentials = Credentials.emailPassword(values.email, values.password);
-      const user = await app.logIn(credentials);
-
-      toast({
-        title: 'Login Successful!',
-        description: "Welcome back! You're being redirected.",
+      // Try built-in server auth endpoint first (MongoDB-backed)
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(values),
       });
 
-      localStorage.setItem('auth-token', user.accessToken ?? '');
-      localStorage.setItem('currentUser', JSON.stringify({
-        id: user.id,
-        email: user.profile.email,
-        // Add more fields if needed
-      }));
-      console.log('Redirecting to /chat after login');
-      toast({ title: 'Debug', description: 'Redirecting to /chat', variant: 'default' });
-      router.push('/chat');
+      if (res.ok) {
+        const data = await res.json();
+        localStorage.setItem('auth-token', data.token || '');
+        localStorage.setItem('currentUser', JSON.stringify(data.user || {}));
+        toast({ title: 'Login Successful!', description: "Welcome back! You're being redirected." });
+        router.push('/chat');
+        return;
+      }
+
+      // If server responded with an error (4xx/5xx), show that message instead of falling back to Realm.
+      let parsed: any = null;
+      try {
+        parsed = await res.json();
+      } catch (e) {
+        // not JSON
+      }
+      const serverMsg = parsed?.error || parsed?.message || (await res.text()).slice(0, 200);
+      throw new Error(serverMsg || 'Login failed');
     } catch (error: any) {
       console.error('Error logging in: ', error);
-      toast({
-        title: 'Login Failed',
-        description: error?.error || error?.message || 'An unexpected error occurred.',
-        variant: 'destructive',
-      });
+      const raw = error?.error || error?.message || String(error || '');
+      const isEol = /atlas app services|device sync|reached eol/i.test(raw);
+      if (isEol) {
+        toast({
+          title: 'Login Failed',
+          description:
+            'MongoDB Atlas App Services (Realm) and Device Sync have reached end-of-life. Authentication via this provider is currently unavailable. Please contact the site administrator or switch to the configured alternative auth provider.',
+          variant: 'destructive',
+        });
+      } else {
+        toast({
+          title: 'Login Failed',
+          description: raw || 'An unexpected error occurred.',
+          variant: 'destructive',
+        });
+      }
     }
   }
 

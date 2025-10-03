@@ -24,6 +24,7 @@ type UserListProps = {
   onDeleteConversation: (conversationId: string) => void;
   onArchiveConversation: (conversationId: string) => void;
   onRemoveContact: (userId: string) => void;
+  onAddContact: (userId: string) => void;
   onBackToMain: () => void;
   onSettingsClick: () => void;
 };
@@ -42,6 +43,7 @@ export default function UserList({
   onDeleteConversation,
   onArchiveConversation,
   onRemoveContact,
+  onAddContact,
   onBackToMain,
   onSettingsClick,
 }: UserListProps) {
@@ -93,7 +95,8 @@ export default function UserList({
   };
 
   const handleAddContact = (userId: string) => {
-    // This is a placeholder, the actual implementation is in chat-layout
+    // Delegate to parent (chat-layout) to persist the contact
+    onAddContact(userId);
   };
   
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {

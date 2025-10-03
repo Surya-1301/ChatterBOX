@@ -59,39 +59,49 @@ export default function SignupForm() {
 
   async function onSubmit(values: z.infer<typeof formSchema>) {
     try {
-      // Register user with MongoDB Realm
-      await app.emailPasswordAuth.registerUser({
-        email: values.email,
-        password: values.password,
+      // Call server-side signup endpoint (stores user in MongoDB)
+      const res = await fetch('/api/auth/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: values.email, password: values.password, name: values.name, username: values.username }),
       });
 
-      toast({
-        title: 'Signup Successful!',
-        description: 'You have been registered. Logging you in...'
-      });
-
-      // Attempt to log in the user immediately after signup
-      try {
-        const loginCredentials = Credentials.emailPassword(values.email, values.password);
-        const user = await app.logIn(loginCredentials);
-        localStorage.setItem('auth-token', user.accessToken ?? '');
-        localStorage.setItem('currentUser', JSON.stringify({
-          id: user.id,
-          email: user.profile.email,
-          // Add more fields if needed
-        }));
+      if (res.ok) {
+        const data = await res.json();
+        localStorage.setItem('auth-token', data.token || '');
+        localStorage.setItem('currentUser', JSON.stringify(data.user || {}));
+        toast({ title: 'Signup Successful!', description: 'You have been registered. Logging you in...' });
         router.push('/chat');
-      } catch (loginError) {
-        // If login fails, fallback to login page
-        router.push('/login');
+        return;
       }
+
+      if (res.ok) return; // already handled above
+
+      // If server responded with an error, surface it instead of silently falling back.
+      let parsed: any = null;
+      try {
+        parsed = await res.json();
+      } catch (e) {}
+      const serverMsg = parsed?.error || parsed?.message || (await res.text()).slice(0, 200);
+      throw new Error(serverMsg || 'Signup failed');
     } catch (error: any) {
       console.error('Error signing up: ', error);
-      toast({
-        title: 'Registration Failed',
-        description: error?.error || error?.message || 'An unexpected error occurred.',
-        variant: 'destructive',
-      });
+      const raw = error?.error || error?.message || String(error || '');
+      const isEol = /atlas app services|device sync|reached eol/i.test(raw);
+      if (isEol) {
+        toast({
+          title: 'Signup Failed',
+          description:
+            'MongoDB Atlas App Services (Realm) and Device Sync have reached end-of-life. Registration via this provider is currently unavailable. Please contact the site administrator or use another signup method.',
+          variant: 'destructive',
+        });
+      } else {
+        toast({
+          title: 'Registration Failed',
+          description: raw || 'An unexpected error occurred.',
+          variant: 'destructive',
+        });
+      }
     }
   }
 

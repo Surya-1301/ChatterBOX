@@ -58,21 +58,22 @@ export default function Chat({ conversation, currentUser, users, onBack, onUserU
     let cancelled = false;
     async function fetchMessages() {
       try {
-        const mongo = app.currentUser?.mongoClient('mongodb-atlas');
-        if (!mongo) throw new Error('Not authenticated with MongoDB Realm');
-        const messagesCollection = mongo.db('chatterbox').collection('messages');
-        // Fetch messages for this conversation, sorted by timestamp
-        const msgs = await messagesCollection.find(
-          { conversationId: conversation.id },
-          { sort: { timestamp: 1 } }
-        );
-        let filteredMsgs = msgs;
-        if (isCurrentUserBlocked) {
-          filteredMsgs = msgs.filter(m => m.from !== otherUser?.id);
-        }
-        if (!cancelled) {
-          setMessages(filteredMsgs);
-          setIsLoading(false);
+        // Use server API to fetch messages
+        const res = await fetch(`/api/messages?conversationId=${encodeURIComponent(conversation.id)}`);
+        if (res.ok) {
+          const msgs = await res.json();
+          let filteredMsgs = msgs;
+          if (isCurrentUserBlocked) filteredMsgs = msgs.filter((m:any) => m.from !== otherUser?.id);
+          if (!cancelled) { setMessages(filteredMsgs); setIsLoading(false); }
+        } else {
+          // Fallback to Realm if API fails
+          const mongo = app.currentUser?.mongoClient('mongodb-atlas');
+          if (!mongo) throw new Error('Not authenticated with MongoDB Realm');
+          const messagesCollection = mongo.db('chatterbox').collection('messages');
+          const msgs = await messagesCollection.find({ conversationId: conversation.id }, { sort: { timestamp: 1 } });
+          let filteredMsgs = msgs;
+          if (isCurrentUserBlocked) filteredMsgs = msgs.filter(m => m.from !== otherUser?.id);
+          if (!cancelled) { setMessages(filteredMsgs); setIsLoading(false); }
         }
         // Optionally, update read status here if needed
       } catch (error) {
@@ -102,15 +103,13 @@ export default function Chat({ conversation, currentUser, users, onBack, onUserU
 
   const addSystemMessage = async (content: string) => {
     try {
-      const mongo = app.currentUser?.mongoClient('mongodb-atlas');
-      if (!mongo) throw new Error('Not authenticated with MongoDB Realm');
-      const messagesCollection = mongo.db('chatterbox').collection('messages');
-      await messagesCollection.insertOne({
-        content,
-        from: 'system',
-        conversationId: conversation.id,
-        timestamp: new Date().toISOString(),
+      // Use server API to insert system message
+      const res = await fetch('/api/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content, from: 'system', conversationId: conversation.id, timestamp: new Date().toISOString() }),
       });
+      if (!res.ok) throw new Error('Failed to add system message');
     } catch (error) {
       console.error('Error adding system message:', error);
     }
@@ -185,41 +184,44 @@ export default function Chat({ conversation, currentUser, users, onBack, onUserU
 
     if (isOnline) {
       try {
-        // Use MongoDB Realm to insert the message
-        const mongo = app.currentUser?.mongoClient('mongodb-atlas');
-        if (!mongo) throw new Error('Not authenticated with MongoDB Realm');
-        const messagesCollection = mongo.db('chatterbox').collection('messages');
-        await messagesCollection.insertOne({
-          ...newMessage,
+        // Preferred: use server API to create message (works without Realm client)
+        const res = await fetch('/api/messages', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...newMessage }),
         });
 
-        // Optionally update conversation metadata
-        const conversationsCollection = mongo.db('chatterbox').collection('conversations');
-        const otherParticipantIds = conversation.participants.filter(p => p !== currentUser.id);
-        await conversationsCollection.updateOne(
-          { _id: conversation.id },
-          {
-            $set: {
-              lastMessage: newMessage.content || (newMessage.fileName || 'File sent'),
-              timestamp: new Date().toISOString(),
-            },
-            $inc: { unreadCount: otherParticipantIds.length },
+        if (res.ok) {
+          // Optionally update local messages state immediately
+          const created = await res.json();
+          setMessages(prev => [...prev, created]);
+          return;
+        }
+
+        // If server returned an error, surface it
+        let parsed = null;
+        try { parsed = await res.json(); } catch (e) {}
+        const serverMsg = parsed?.error || parsed?.message || (await res.text()).slice(0,200);
+        throw new Error(serverMsg || 'Failed to send message');
+      } catch (error: any) {
+        console.error('Error sending message:', error);
+        // If fetch/network error, try Realm fallback
+        if (/fetch|network|failed to fetch/i.test(String(error.message || ''))) {
+          try {
+            const mongo = app.currentUser?.mongoClient('mongodb-atlas');
+            if (!mongo) throw new Error('Not authenticated with MongoDB Realm');
+            const messagesCollection = mongo.db('chatterbox').collection('messages');
+            await messagesCollection.insertOne({ ...newMessage });
+            return;
+          } catch (realmErr) {
+            console.error('Realm fallback failed:', realmErr);
           }
-        );
-      } catch (error) {
-        console.error("Error sending message:", error);
-        toast({
-          title: "Error",
-          description: "Could not send message.",
-          variant: "destructive"
-        });
+        }
+
+        toast({ title: 'Error', description: error?.message || 'Could not send message.', variant: 'destructive' });
       }
     } else {
-      toast({
-        title: "You are offline",
-        description: "Your message will be sent when you're back online.",
-        variant: 'destructive',
-      });
+      toast({ title: 'You are offline', description: "Your message will be sent when you're back online.", variant: 'destructive' });
     }
   };
   
