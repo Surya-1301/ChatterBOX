@@ -1,0 +1,150 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  font-family: var(--font-body);
+}
+
+@layer base {
+  :root {
+    --background: 210 20% 96%; /* #F0F2F5 */
+    --foreground: 240 5.3% 26.1%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 5.3% 26.1%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 5.3% 26.1%;
+    --primary: 172 45% 45%; /* #428C7A */
+    --primary-foreground: 0 0% 98%;
+    --secondary: 210 15% 90%;
+    --secondary-foreground: 240 5.3% 26.1%;
+    --muted: 210 15% 90%;
+    --muted-foreground: 240 5.3% 46.1%;
+    --accent: 172 35% 85%; /* #C3E5DD */
+    --accent-foreground: 172 40% 15%;
+    --sent-bubble: 145 74% 88%; /* #D9FDD3 */
+    --sent-bubble-foreground: 240 5.3% 26.1%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 210 15% 88%;
+    --input: 0 0% 98%;
+    --ring: 172 45% 45%;
+    --radius: 0.5rem;
+
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-primary: 172 45% 45%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 210 20% 96%;
+    --sidebar-accent-foreground: 240 5.3% 26.1%;
+    --sidebar-border: 210 15% 88%;
+    --sidebar-ring: 172 45% 45%;
+  }
+
+  .dark {
+    --background: 240 6% 10%; /* #1A1A1A */
+    --foreground: 0 0% 98%;
+    --card: 240 5% 15%; /* #262626 */
+    --card-foreground: 0 0% 98%;
+    --popover: 240 5% 15%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 172 65% 55%; /* #55CBA7 */
+    --primary-foreground: 240 6% 10%;
+    --secondary: 240 4% 20%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 240 4% 20%;
+    --muted-foreground: 0 0% 60%;
+    --accent: 172 55% 25%;
+    --accent-foreground: 0 0% 98%;
+    --sent-bubble: 172 60% 30%; /* Darker green */
+    --sent-bubble-foreground: 0 0% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 4% 25%;
+    --input: 240 4% 22%;
+    --ring: 172 65% 55%;
+    
+    --sidebar-background: 240 5% 15%;
+    --sidebar-foreground: 0 0% 98%;
+    --sidebar-primary: 172 65% 55%;
+    --sidebar-primary-foreground: 240 6% 10%;
+    --sidebar-accent: 240 4% 20%;
+    --sidebar-accent-foreground: 0 0% 98%;
+    --sidebar-border: 240 4% 25%;
+    --sidebar-ring: 172 65% 55%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* Swipe gestures styles */
+.swipe-container {
+  touch-action: pan-y; /* Allow vertical scrolling but handle horizontal swipes */
+}
+
+.swipe-item {
+  user-select: none; /* Prevent text selection during swipe */
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+}
+
+.swipe-item.dragging {
+  cursor: grabbing;
+  -webkit-cursor: grabbing;
+}
+
+/* Disable text selection during touch interactions */
+.touch-pan-y {
+  touch-action: pan-y;
+}
+
+/* Swipe animations */
+@keyframes swipe-hint-pulse {
+  0%, 100% { 
+    opacity: 0.8; 
+    transform: scale(1);
+  }
+  50% { 
+    opacity: 1; 
+    transform: scale(1.02);
+  }
+}
+
+.swipe-hint {
+  animation: swipe-hint-pulse 2s ease-in-out infinite;
+}
+
+@keyframes swipe-success {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+  100% { transform: scale(1); }
+}
+
+.swipe-success {
+  animation: swipe-success 0.3s ease-out;
+}
+
+/* Custom gradient background for swipe actions */
+.swipe-gradient-delete {
+  background: linear-gradient(90deg, 
+    rgba(239, 68, 68, 0.1) 0%, 
+    rgba(239, 68, 68, 0.3) 50%, 
+    rgba(0, 0, 0, 0) 100%
+  );
+}
+
+.swipe-gradient-archive {
+  background: linear-gradient(270deg, 
+    rgba(59, 130, 246, 0.1) 0%, 
+    rgba(59, 130, 246, 0.3) 50%, 
+    rgba(0, 0, 0, 0) 100%
+  );
+}

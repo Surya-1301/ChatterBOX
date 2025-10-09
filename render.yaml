@@ -1,0 +1,13 @@
+
+services:
+  - type: web
+    name: chatterbox
+    env: node
+    plan: free
+    # Use npm ci in CI/Render for reproducible installs and then build
+    buildCommand: "npm ci && npm run build"
+    # next start reads the PORT env var provided by Render. Keep npm start.
+    startCommand: "npm start"
+    envVars:
+      - key: NODE_ENV
+        value: production
